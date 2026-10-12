@@ -1,0 +1,8 @@
+find_package(GTest CONFIG REQUIRED)
+include(GoogleTest)
+NavalCommandGetDependencySource(https://github.com/NavalCommand/Domain.Api.git domainSource)
+add_executable(NavalCommand.World.Test NavalCommand/World/ReplicationTest.cpp)
+target_include_directories(NavalCommand.World.Test PRIVATE "${domainSource}/mock")
+target_link_libraries(NavalCommand.World.Test PRIVATE NavalCommand.World GTest::gtest_main GTest::gmock)
+NavalCommandConfigureTarget(NavalCommand.World.Test)
+gtest_discover_tests(NavalCommand.World.Test DISCOVERY_MODE PRE_TEST)
