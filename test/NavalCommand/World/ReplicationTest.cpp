@@ -73,7 +73,7 @@ namespace NavalCommand::World
 					}));
 			ON_CALL(Operations, GetUnitOperations(_)).WillByDefault(Return(Operations::Api::UnitState{}));
 			ON_CALL(Factions, GetFactionIds()).WillByDefault(Return(std::vector<Factions::Api::Id>{{"blue"}, {"red"}}));
-			ON_CALL(Factions, GetFactionAlignment(_, _)).WillByDefault(Return(Factions::Api::Alignment::Neutral));
+			ON_CALL(Factions, GetFactionAlignment(_, _)).WillByDefault(Return(Classification::Api::Alignment::Neutral));
 			ON_CALL(Types, GetUnitTypeIds()).WillByDefault(Return(std::vector<Units::Api::TypeId>{}));
 			ON_CALL(Equipment, GetEquipmentTypes()).WillByDefault(Return(std::vector<Equipment::Api::TypeId>{}));
 			ON_CALL(Resources, GetResourceIds()).WillByDefault(Return(std::vector<Resources::Api::Id>{}));
