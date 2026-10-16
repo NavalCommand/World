@@ -14,6 +14,7 @@
 #include <NavalCommand/World/Engine.h>
 #include <gtest/gtest.h>
 #include <thread>
+#include <utility>
 
 namespace NavalCommand::World
 {
@@ -39,6 +40,16 @@ namespace NavalCommand::World
 		std::uint64_t Revision{1};
 		std::string Faction{"blue"};
 		std::string UnitName{"Initial"};
+		std::string UnitTypeId{"frigate"};
+		std::string SelectedLoadout{"frigate::loadout::empty"};
+		bool UnitDestroyed{};
+		Classification::Api::SubCategory UnitSubCategory{Classification::Api::SubCategory::Frigate};
+		Classification::Api::Role PlatformRole{Classification::Api::Role::SurfaceWarfare};
+		Classification::Api::Role LoadoutRole{Classification::Api::Role::AntiSubmarineWarfare};
+		Classification::Api::Category ContactCategory{Classification::Api::Category::SurfaceVessel};
+		std::string ObservedFaction{"red"};
+		std::string ObservationLoadout{"frigate::loadout::empty"};
+		bool ObservationDestroyed{};
 		bool Available{true};
 		std::atomic<int> Acquisitions{};
 
@@ -57,10 +68,14 @@ namespace NavalCommand::World
 						Units::Api::Instance unit{};
 						unit.Identity = id;
 						unit.Name = UnitName;
+						unit.Type.Value = UnitTypeId;
+						unit.CurrentLoadout.Value = SelectedLoadout;
+						unit.IsDestroyed = UnitDestroyed;
 						unit.Faction.Value = Faction;
 						return unit;
 					}));
-			ON_CALL(Observations, GetObservationIds()).WillByDefault(Return(std::vector<Observations::Api::Id>{{"contact"}}));
+			ON_CALL(Observations, GetObservationIds())
+				.WillByDefault(Return(std::vector<Observations::Api::Id>{{"type-only"}, {"faction-only"}}));
 			ON_CALL(Observations, GetObservationInstance(_))
 				.WillByDefault(Invoke(
 					[this](const Observations::Api::Id& id) -> Error::Api::Result<Observations::Api::Instance>
@@ -68,13 +83,36 @@ namespace NavalCommand::World
 						Observations::Api::Instance observation{};
 						observation.Identity = id;
 						observation.ObserverFaction.Value = Faction;
+						if (id.Value == "type-only")
+						{
+							observation.Type = decltype(observation.Type)::Known(ContactCategory);
+							observation.CurrentLoadout = decltype(observation.CurrentLoadout)::Known({ObservationLoadout});
+							observation.IsDestroyed = decltype(observation.IsDestroyed)::Known(ObservationDestroyed);
+						}
+						else
+						{
+							observation.ObservedFaction = decltype(observation.ObservedFaction)::Known({ObservedFaction});
+						}
 						observation.Kinematics.Position = Observations::Api::PartiallyLocalizedPosition{};
 						return observation;
 					}));
 			ON_CALL(Operations, GetUnitOperations(_)).WillByDefault(Return(Operations::Api::UnitState{}));
 			ON_CALL(Factions, GetFactionIds()).WillByDefault(Return(std::vector<Factions::Api::Id>{{"blue"}, {"red"}}));
-			ON_CALL(Factions, GetFactionAlignment(_, _)).WillByDefault(Return(Factions::Api::Alignment::Neutral));
-			ON_CALL(Types, GetUnitTypeIds()).WillByDefault(Return(std::vector<Units::Api::TypeId>{}));
+			ON_CALL(Factions, GetFactionAlignment(_, _)).WillByDefault(Return(Classification::Api::Alignment::Neutral));
+			ON_CALL(Types, GetUnitTypeIds()).WillByDefault(Invoke([this] { return std::vector<Units::Api::TypeId>{{UnitTypeId}}; }));
+			ON_CALL(Types, GetUnitType(_)).WillByDefault(Invoke(
+				[this](const Units::Api::TypeId& id) -> Error::Api::Result<Units::Api::Type>
+				{
+					Units::Api::Type type{};
+					type.Id = id;
+					type.UnitSubCategory = UnitSubCategory;
+					type.PlatformRoles.push_back(PlatformRole);
+					Equipment::Api::Loadout loadout{};
+					loadout.Id = {SelectedLoadout};
+					loadout.Roles.push_back(LoadoutRole);
+					type.Loadouts.push_back(std::move(loadout));
+					return type;
+				}));
 			ON_CALL(Equipment, GetEquipmentTypes()).WillByDefault(Return(std::vector<Equipment::Api::TypeId>{}));
 			ON_CALL(Resources, GetResourceIds()).WillByDefault(Return(std::vector<Resources::Api::Id>{}));
 			ON_CALL(Time, GetCurrentTime()).WillByDefault(Return(Physics::Api::Seconds{42}));
@@ -110,12 +148,77 @@ namespace NavalCommand::World
 		Engine engine{Acquisition()};
 		ASSERT_TRUE(engine.Refresh());
 		auto first = engine.AcquireView();
+		auto firstType = first->GetUnitType({"frigate"});
+		ASSERT_TRUE(firstType);
+		EXPECT_EQ(firstType->UnitSubCategory, Classification::Api::SubCategory::Frigate);
+		ASSERT_EQ(firstType->PlatformRoles.size(), 1);
+		EXPECT_EQ(firstType->PlatformRoles[0], Classification::Api::Role::SurfaceWarfare);
+		ASSERT_EQ(firstType->Loadouts.size(), 1);
+		EXPECT_EQ(firstType->Loadouts[0].Id.Value, "frigate::loadout::empty");
+		ASSERT_EQ(firstType->Loadouts[0].Roles.size(), 1);
+		EXPECT_EQ(firstType->Loadouts[0].Roles[0], Classification::Api::Role::AntiSubmarineWarfare);
+		auto firstContact = first->GetObservationInstance({"type-only"});
+		ASSERT_TRUE(firstContact);
+		ASSERT_NE(firstContact->Type.GetIf<Classification::Api::Category>(), nullptr);
+		EXPECT_EQ(*firstContact->Type.GetIf<Classification::Api::Category>(), Classification::Api::Category::SurfaceVessel);
+		EXPECT_FALSE(firstContact->ObservedFaction.IsKnown());
+		EXPECT_EQ(firstContact->CurrentLoadout.Value().Value, "frigate::loadout::empty");
+		ASSERT_TRUE(firstContact->IsDestroyed.IsKnown());
+		EXPECT_FALSE(firstContact->IsDestroyed.Value());
+		auto firstFactionOnly = first->GetObservationInstance({"faction-only"});
+		ASSERT_TRUE(firstFactionOnly);
+		EXPECT_TRUE(firstFactionOnly->Type.IsUnknown());
+		EXPECT_EQ(firstFactionOnly->ObservedFaction.Value().Value, "red");
+		auto firstUnit = first->GetUnitInstance({"unit"});
+		ASSERT_TRUE(firstUnit);
+		EXPECT_EQ(firstUnit->CurrentLoadout.Value, "frigate::loadout::empty");
+		EXPECT_FALSE(firstUnit->IsDestroyed);
+
 		Source->UnitName = "Changed";
+		Source->UnitTypeId = "destroyer";
+		Source->SelectedLoadout = "destroyer::loadout::standard";
+		Source->UnitDestroyed = true;
+		Source->UnitSubCategory = Classification::Api::SubCategory::Destroyer;
+		Source->PlatformRole = Classification::Api::Role::Strike;
+		Source->LoadoutRole = Classification::Api::Role::LandAttack;
+		Source->ContactCategory = Classification::Api::Category::Other;
+		Source->ObservedFaction = "blue";
+		Source->ObservationLoadout = "destroyer::loadout::standard";
+		Source->ObservationDestroyed = true;
 		++Source->Revision;
 		ASSERT_TRUE(engine.Refresh());
 		auto second = engine.AcquireView();
+		auto secondType = second->GetUnitType({"destroyer"});
+		ASSERT_TRUE(secondType);
+		EXPECT_EQ(secondType->UnitSubCategory, Classification::Api::SubCategory::Destroyer);
+		ASSERT_EQ(secondType->PlatformRoles.size(), 1);
+		EXPECT_EQ(secondType->PlatformRoles[0], Classification::Api::Role::Strike);
+		ASSERT_EQ(secondType->Loadouts.size(), 1);
+		ASSERT_EQ(secondType->Loadouts[0].Roles.size(), 1);
+		EXPECT_EQ(secondType->Loadouts[0].Roles[0], Classification::Api::Role::LandAttack);
+		auto secondContact = second->GetObservationInstance({"type-only"});
+		ASSERT_TRUE(secondContact);
+		ASSERT_NE(secondContact->Type.GetIf<Classification::Api::Category>(), nullptr);
+		EXPECT_EQ(*secondContact->Type.GetIf<Classification::Api::Category>(), Classification::Api::Category::Other);
+		EXPECT_FALSE(secondContact->ObservedFaction.IsKnown());
+		EXPECT_EQ(secondContact->CurrentLoadout.Value().Value, "destroyer::loadout::standard");
+		EXPECT_TRUE(secondContact->IsDestroyed.Value());
+		auto secondFactionOnly = second->GetObservationInstance({"faction-only"});
+		ASSERT_TRUE(secondFactionOnly);
+		EXPECT_TRUE(secondFactionOnly->Type.IsUnknown());
+		EXPECT_EQ(secondFactionOnly->ObservedFaction.Value().Value, "blue");
+		auto secondUnit = second->GetUnitInstance({"unit"});
+		ASSERT_TRUE(secondUnit);
+		EXPECT_EQ(secondUnit->CurrentLoadout.Value, "destroyer::loadout::standard");
+		EXPECT_TRUE(secondUnit->IsDestroyed);
+
 		EXPECT_EQ(first->GetUnitInstance({"unit"})->Name, "Initial");
 		EXPECT_EQ(second->GetUnitInstance({"unit"})->Name, "Changed");
+		EXPECT_EQ(firstType->UnitSubCategory, Classification::Api::SubCategory::Frigate);
+		EXPECT_FALSE(firstContact->ObservedFaction.IsKnown());
+		EXPECT_EQ(firstFactionOnly->ObservedFaction.Value().Value, "red");
+		EXPECT_FALSE(firstContact->IsDestroyed.Value());
+		EXPECT_FALSE(firstUnit->IsDestroyed);
 		EXPECT_NE(first->Revision(), second->Revision());
 		EXPECT_FALSE(first->GetUnitInstance({"hidden"}));
 	}
@@ -159,8 +262,8 @@ namespace NavalCommand::World
 		EXPECT_FALSE(engine.AcquireView());
 		ASSERT_TRUE(engine.Refresh());
 		auto red = engine.AcquireView();
-		EXPECT_EQ(blue->GetObservationInstance({"contact"})->ObserverFaction.Value, "blue");
-		EXPECT_EQ(red->GetObservationInstance({"contact"})->ObserverFaction.Value, "red");
+		EXPECT_EQ(blue->GetObservationInstance({"type-only"})->ObserverFaction.Value, "blue");
+		EXPECT_EQ(red->GetObservationInstance({"type-only"})->ObserverFaction.Value, "red");
 		EXPECT_EQ(blue->GetUnitInstance({"unit"})->Faction.Value, "blue");
 		EXPECT_EQ(red->GetUnitInstance({"unit"})->Faction.Value, "red");
 	}

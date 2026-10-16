@@ -1,3 +1,4 @@
+#include <NavalCommand/Classification/Api/Alignment.h>
 #include <NavalCommand/Error/Api/MakeError.h>
 #include <NavalCommand/World/Engine.h>
 #include <atomic>
@@ -53,7 +54,7 @@ namespace NavalCommand::World
 		std::unordered_map<std::string, Error::Api::Result<Units::Api::Type>> TypeValues;
 		std::unordered_map<std::string, Error::Api::DomainResult<Equipment::Api::Type, Equipment::Api::Error>> EquipmentValues;
 		std::unordered_map<std::string, Error::Api::Result<std::vector<Resources::Api::Definition>>> ResourceValues;
-		std::unordered_map<std::string, std::unordered_map<std::string, Error::Api::DomainResult<Factions::Api::Alignment, Factions::Api::Error>>> Alignments;
+		std::unordered_map<std::string, std::unordered_map<std::string, Error::Api::DomainResult<Classification::Api::Alignment, Factions::Api::Error>>> Alignments;
 
 		explicit Snapshot(UpstreamView upstream) : Upstream{std::move(upstream)}
 		{
@@ -122,9 +123,9 @@ namespace NavalCommand::World
 		return m_Snapshot->Factions;
 	}
 
-	Error::Api::DomainResult<Factions::Api::Alignment, Factions::Api::Error> View::GetFactionAlignment(const Factions::Api::Id& id, const Factions::Api::Id& second)
+	Error::Api::DomainResult<Classification::Api::Alignment, Factions::Api::Error> View::GetFactionAlignment(const Factions::Api::Id& id, const Factions::Api::Id& second)
 	{
-		using Result = Error::Api::DomainResult<Factions::Api::Alignment, Factions::Api::Error>;
+		using Result = Error::Api::DomainResult<Classification::Api::Alignment, Factions::Api::Error>;
 		if (!m_Snapshot->Factions)
 		{
 			return std::unexpected(Result::error_type{m_Snapshot->Factions.error()});
