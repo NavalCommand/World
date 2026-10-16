@@ -14,6 +14,7 @@
 #include <NavalCommand/World/Engine.h>
 #include <gtest/gtest.h>
 #include <thread>
+#include <utility>
 
 namespace NavalCommand::World
 {
@@ -102,8 +103,14 @@ namespace NavalCommand::World
 			ON_CALL(Types, GetUnitType(_)).WillByDefault(Invoke(
 				[this](const Units::Api::TypeId& id) -> Error::Api::Result<Units::Api::Type>
 				{
-					Units::Api::Type type{id, UnitSubCategory, {PlatformRole}, {}};
-					type.Loadouts.push_back({{SelectedLoadout}, {}, {LoadoutRole}});
+					Units::Api::Type type{};
+					type.Id = id;
+					type.UnitSubCategory = UnitSubCategory;
+					type.PlatformRoles.push_back(PlatformRole);
+					Equipment::Api::Loadout loadout{};
+					loadout.Id = {SelectedLoadout};
+					loadout.Roles.push_back(LoadoutRole);
+					type.Loadouts.push_back(std::move(loadout));
 					return type;
 				}));
 			ON_CALL(Equipment, GetEquipmentTypes()).WillByDefault(Return(std::vector<Equipment::Api::TypeId>{}));
